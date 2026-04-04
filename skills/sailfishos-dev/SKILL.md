@@ -65,15 +65,48 @@ harbour-myapp/
 TARGET = harbour-myapp
 CONFIG += sailfishapp
 SOURCES += src/harbour-myapp.cpp   # omit for QML-only
-QML_IMPORT_PATH =
+
+# .desktop must be installed explicitly — CONFIG += sailfishapp does NOT auto-generate it
+desktop.files = harbour-myapp.desktop
+desktop.path = /usr/share/applications
+INSTALLS += desktop
+
 DISTFILES += \
+    harbour-myapp.desktop \
     qml/harbour-myapp.qml \
     qml/pages/MainPage.qml \
     qml/cover/CoverPage.qml \
     rpm/harbour-myapp.spec
+
+icons86.files = icons/86x86/harbour-myapp.png
+icons86.path = /usr/share/icons/hicolor/86x86/apps
+icons108.files = icons/108x108/harbour-myapp.png
+icons108.path = /usr/share/icons/hicolor/108x108/apps
+icons128.files = icons/128x128/harbour-myapp.png
+icons128.path = /usr/share/icons/hicolor/128x128/apps
+icons172.files = icons/172x172/harbour-myapp.png
+icons172.path = /usr/share/icons/hicolor/172x172/apps
+INSTALLS += icons86 icons108 icons128 icons172
 ```
 
 `CONFIG += sailfishapp` pulls in libsailfishapp and sets correct install paths automatically.
+
+You must also create `harbour-myapp.desktop` in the project root:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=My App
+Icon=harbour-myapp
+Exec=harbour-myapp
+X-Nemo-Application-Type=silica-qt5
+X-Nemo-Single-Instance=yes
+
+[X-Sailjail]
+Permissions=
+OrganizationName=com.example
+ApplicationName=harbour-myapp
+```
 
 ### main.cpp (C++/QML hybrid)
 
@@ -229,6 +262,20 @@ private:
 
 ## Build, deploy, run (sfdk)
 
+### Workspace constraint
+
+Projects **must** live inside the sfdk workspace directory — the build engine Docker
+container only mounts that path. On this machine: `~/repos/sailfishos-dev/`.
+
+```bash
+# Check the mounted workspace:
+/usr/bin/docker inspect sailfish-sdk-build-engine_crimson | python3 -c \
+  "import json,sys; c=json.load(sys.stdin)[0]; [print(m['Source']) for m in c['Mounts'] if '/repos/' in m['Source']]"
+```
+
+If you get `The command needs to be used under Sailfish SDK workspace`, move your project
+inside that directory.
+
 ### This setup: Ubuntu 25.04, SailfishOS 5.0.0.62
 
 ```bash
@@ -354,10 +401,6 @@ Longer description of the application.
 
 %install
 %qmake5_install
-
-desktop-file-install --delete-original \
-    --dir %{buildroot}%{_datadir}/applications \
-    %{buildroot}%{_datadir}/applications/*.desktop
 
 %files
 %{_bindir}/%{name}

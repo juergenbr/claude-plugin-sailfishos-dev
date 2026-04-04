@@ -166,6 +166,9 @@ ApplicationName=harbour-myapp
   `%{_datadir}/applications`, `%{_datadir}/icons`
 - Must not require packages that aren't in the Harbour-allowed list
 - `BuildRequires` should reference `pkgconfig(sailfishapp)`, `pkgconfig(Qt5Core)`, etc.
+- **Do not** use `desktop-file-install` with a glob in `%install` — the glob fails in the
+  sfdk build context. `%qmake5_install` alone is sufficient when the `.desktop` file is
+  installed via `INSTALLS` in the `.pro` file.
 
 ---
 
