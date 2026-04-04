@@ -1,6 +1,6 @@
 title: sailfishos-dev
 description: SailfishOS app development skill for Claude Code
-theme: just-the-docs
+remote_theme: just-the-docs/just-the-docs
 url: "https://juergenbr.github.io"
 baseurl: "/claude-plugin-sailfishos-dev"
 
