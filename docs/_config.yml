@@ -1,7 +1,8 @@
 title: sailfishos-dev
 description: SailfishOS app development skill for Claude Code
 theme: just-the-docs
-url: "http://blog.breitenbaumer.com/claude-plugin-sailfishos-dev"
+url: "https://juergenbr.github.io"
+baseurl: "/claude-plugin-sailfishos-dev"
 
 # Navigation order
 nav_order:
