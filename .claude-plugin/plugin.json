@@ -1,0 +1,7 @@
+{
+  "name": "sailfishos-dev",
+  "description": "SailfishOS app development skill — build, deploy, debug and publish Sailfish apps with Silica QML",
+  "author": {
+    "name": "juergenbr"
+  }
+}
