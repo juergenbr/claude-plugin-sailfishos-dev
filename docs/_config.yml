@@ -1,0 +1,18 @@
+title: sailfishos-dev
+description: SailfishOS app development skill for Claude Code
+theme: just-the-docs
+url: "https://juergenbr.github.io/claude-plugin-sailfishos-dev"
+
+# Navigation order
+nav_order:
+  - index
+  - skill
+  - silica-components
+  - design-guidelines
+  - harbour
+  - platform-apis
+
+just_the_docs:
+  collections:
+    docs:
+      name: Documentation
