@@ -3,13 +3,6 @@ title: Skill Overview
 nav_order: 2
 ---
 
-  pulley menus, C++/QML integration, or platform APIs (Notifications, DBus, Contacts).
-  Also activate for questions about app architecture, the .pro file, .spec file, naming
-  conventions, or the emulator. Trigger on any mention of: SailfishOS, Sailfish, Silica,
-  sfdk, Harbour, ApplicationWindow, PullDownMenu, PageStack, Cover, or sfdk emulator.
-version: 1.0.0
----
-
 # SailfishOS App Development
 
 You are a SailfishOS expert. Answer with precision: write correct Silica QML, give exact
@@ -24,6 +17,44 @@ touches a specific domain, read the matching reference file before answering.
 | `references/design-guidelines.md` | Theme.* properties, spacing, colours, pitfalls, UX patterns |
 | `references/harbour.md` | Harbour store submission, allowed APIs, RPM spec, icon/screenshot rules |
 | `references/platform-apis.md` | Notifications, DBus, Contacts, Pickers, KeepAlive, Thumbnailer |
+| `references/profile-ubuntu-native.md` | Before ANY build/deploy/emulator/debug command when the host is the Ubuntu dev machine |
+| `references/profile-mac-utm.md` | Before ANY build/deploy/emulator/debug command when the host is a Mac with the UTM VM |
+
+---
+
+## Host profiles — Step 0: detect before running anything
+
+The SDK can run in different host setups and almost every operational command
+(sfdk invocation, workspace path, emulator control, SSH endpoints) differs
+between them. Before the first build/deploy/debug command in a session, detect
+the profile and read the matching reference file. Never mix commands across
+profiles.
+
+```bash
+# from the repository root
+scripts/detect-host.sh
+```
+
+| Profile | Meaning | Read |
+|---|---|---|
+| `ubuntu-native` | Linux machine with the SDK installed natively (Docker build engine, VirtualBox emulator) | `references/profile-ubuntu-native.md` |
+| `mac-utm` | macOS (Apple silicon) machine; SDK runs inside the "SailfishOSDev" UTM Linux VM, all commands go over SSH | `references/profile-mac-utm.md` |
+| `sdk-vm-internal` | You are already inside the UTM VM — use local sfdk commands without the SSH wrapper | `references/profile-mac-utm.md` (same setup, skip the `ssh sailfishdev` prefix) |
+| `unknown` | No supported environment on this machine — tell the user; do not guess commands | — |
+
+Detection is overrideable: if `~/.config/sailfishos-dev/profile` exists, its content
+wins over the probes (useful for pinning unusual setups).
+
+Summary of what changes per profile:
+
+| Aspect | `ubuntu-native` | `mac-utm` |
+|---|---|---|
+| sfdk call | local `~/SailfishOS/bin/sfdk` | `ssh sailfishdev 'DOCKER_DEFAULT_PLATFORM=linux/386 ~/SailfishOS/bin/sfdk …'` |
+| Build engine | host Docker | Docker inside the VM (linux/386, patched image) |
+| Workspace | host home (discover mounts, don't assume) | inside the VM; sync sources from the Mac |
+| Emulator control | `sfdk emulator start` (VirtualBox) | `~/start-emu.sh` in the VM (QEMU; `sfdk emulator` unavailable) |
+| Emulator SSH | host port 2223 | VM port 2223; from the Mac via SSH jump (`-J sailfishdev`) |
+| IDE | host Qt Creator | Qt Creator inside the VM's xfce session |
 
 ---
 
@@ -63,15 +94,48 @@ harbour-myapp/
 TARGET = harbour-myapp
 CONFIG += sailfishapp
 SOURCES += src/harbour-myapp.cpp   # omit for QML-only
-QML_IMPORT_PATH =
+
+# .desktop must be installed explicitly — CONFIG += sailfishapp does NOT auto-generate it
+desktop.files = harbour-myapp.desktop
+desktop.path = /usr/share/applications
+INSTALLS += desktop
+
 DISTFILES += \
+    harbour-myapp.desktop \
     qml/harbour-myapp.qml \
     qml/pages/MainPage.qml \
     qml/cover/CoverPage.qml \
     rpm/harbour-myapp.spec
+
+icons86.files = icons/86x86/harbour-myapp.png
+icons86.path = /usr/share/icons/hicolor/86x86/apps
+icons108.files = icons/108x108/harbour-myapp.png
+icons108.path = /usr/share/icons/hicolor/108x108/apps
+icons128.files = icons/128x128/harbour-myapp.png
+icons128.path = /usr/share/icons/hicolor/128x128/apps
+icons172.files = icons/172x172/harbour-myapp.png
+icons172.path = /usr/share/icons/hicolor/172x172/apps
+INSTALLS += icons86 icons108 icons128 icons172
 ```
 
 `CONFIG += sailfishapp` pulls in libsailfishapp and sets correct install paths automatically.
+
+You must also create `harbour-myapp.desktop` in the project root:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=My App
+Icon=harbour-myapp
+Exec=harbour-myapp
+X-Nemo-Application-Type=silica-qt5
+X-Nemo-Single-Instance=yes
+
+[X-Sailjail]
+Permissions=
+OrganizationName=com.example
+ApplicationName=harbour-myapp
+```
 
 ### main.cpp (C++/QML hybrid)
 
@@ -227,40 +291,68 @@ private:
 
 ## Build, deploy, run (sfdk)
 
-### This setup: Ubuntu 25.04, SailfishOS 5.0.0.62
+### Workspace constraint
+
+Projects must live where the build engine can see them (the mounted paths —
+normally the SDK user's home). The exact location and how to verify it differ per
+host profile: read `references/profile-ubuntu-native.md` or
+`references/profile-mac-utm.md`. If you get
+`The command needs to be used under Sailfish SDK workspace`, the project is outside
+the mounted paths — move or sync it according to the profile file.
+
+### Discover targets and devices (never assume a version)
+
+```bash
+sfdk tools list          # installed targets, e.g. SailfishOS-5.1.0.11-{i486,armv7hl,aarch64}
+sfdk device list         # registered devices, e.g. "Sailfish OS Emulator <version>"
+```
+
+Pick the target by device architecture:
+
+- Emulator: `i486`
+- Phones: `armv7hl` or `aarch64` — if unknown, check on the phone
+  (`rpm -q --qf '%{arch}' systemd`); when in doubt, build both.
+
+### Standard build / deploy / run flow
+
+Commands below are written for a local sfdk (`ubuntu-native`, or
+`sdk-vm-internal`). On `mac-utm`, run them inside the VM and prefix as shown in
+`references/profile-mac-utm.md`. Emulator control is profile-specific:
+`sfdk emulator start` requires VirtualBox (`ubuntu-native` only) — on `mac-utm`
+use the VM's emulator launcher script instead.
 
 ```bash
 SDK=~/SailfishOS/bin/sfdk
 
-# --- Emulator (i486) ---
-$SDK -c target=SailfishOS-5.0.0.62-i486 build
-$SDK emulator start
-$SDK -c target=SailfishOS-5.0.0.62-i486 \
-     -c "device=Sailfish OS Emulator 5.0.0.62" deploy --sdk
-$SDK -c "device=Sailfish OS Emulator 5.0.0.62" run harbour-myapp
+# --- Build for the target ---
+$SDK -c target=<target> build
 
-# --- Physical device aarch64 (Jolla C2, Xperia, Jolla Phone 2026) ---
-$SDK -c target=SailfishOS-5.0.0.62-aarch64 build
-$SDK -c target=SailfishOS-5.0.0.62-aarch64 \
-     -c device="<device-name>" deploy --sdk
+# --- Deploy + run on a device (device names from `sfdk device list`) ---
+$SDK -c target=<target> -c device="<device-name>" deploy --sdk
 $SDK -c device="<device-name>" run harbour-myapp
 
-# --- List devices ---
-$SDK device list
-
-# --- Emulator control ---
-$SDK emulator start
-$SDK emulator stop
-$SDK emulator status
-$SDK emulator set downscale=no   # fill window at native resolution
+# --- Debug on a device ---
+$SDK -c target=<target> -c device="<device-name>" debug harbour-myapp
 ```
+
+Example against the emulator with an installed 5.1.0.11 tooling:
+
+```bash
+$SDK -c target=SailfishOS-5.1.0.11-i486 build
+$SDK -c target=SailfishOS-5.1.0.11-i486 \
+     -c "device=Sailfish OS Emulator 5.1.0.11" deploy --sdk
+$SDK -c "device=Sailfish OS Emulator 5.1.0.11" run harbour-myapp
+```
+
+The same pattern applies to physical devices (Jolla C2, Xperia, Jolla Phone 2026)
+with their matching target.
 
 ### Switching build targets (critical workaround)
 
 `make` reuses stale `.o` files from the previous architecture. Always clean first:
 
 ```bash
-cd ~/repos/sailfishos-dev/<project>
+cd <your-project-dir>   # inside the workspace of your host profile
 rm -f *.o Makefile .qmake.stash harbour-myapp
 rm -f RPMS/*.rpm
 ~/SailfishOS/bin/sfdk -c target=<new-target> build
@@ -278,10 +370,10 @@ rm -f RPMS/*.rpm
 sfdk engine exec
 
 # Shell inside a target (install packages, inspect sysroot)
-sfdk tools target exec SailfishOS-5.0.0.62-aarch64
+sfdk tools target exec <target>
 
 # Install a package into a target
-sfdk tools target package-install SailfishOS-5.0.0.62-aarch64 qt5-qtmultimedia-devel
+sfdk tools target package-install <target> qt5-qtmultimedia-devel
 
 # List toolings and targets
 sfdk tools list
@@ -293,9 +385,13 @@ sfdk tools list
 
 ### Journal logs (most useful)
 
+SSH into the emulator the way your host profile provides (see the profile
+reference file): on `ubuntu-native` it listens on local port 2223; on `mac-utm`
+port 2223 lives inside the VM and needs an SSH jump from the Mac.
+
 ```bash
-# SSH into emulator
-ssh -p 2223 -i ~/SailfishOS/vmshare/ssh/private_keys/sdk defaultuser@127.0.0.1
+# ubuntu-native: ssh -p 2223 -i ~/SailfishOS/vmshare/ssh/private_keys/sdk defaultuser@127.0.0.1
+# mac-utm (from the Mac): ssh -J sailfishdev -p 2223 -i <key path> defaultuser@localhost
 
 # On the device/emulator, follow app logs:
 journalctl -f | grep harbour-myapp
@@ -319,9 +415,11 @@ F11 = step into, Shift+F11 = step out. Works identically for emulator and device
 ### sfdk debug (CLI GDB)
 
 ```bash
-sfdk -c target=SailfishOS-5.0.0.62-i486 \
-     -c "device=Sailfish OS Emulator 5.0.0.62" debug harbour-myapp
+sfdk -c target=<target> -c "device=<device-name>" debug harbour-myapp
 ```
+
+(Targets and device names come from `sfdk tools list` / `sfdk device list`; on
+`mac-utm` run inside the VM with the `DOCKER_DEFAULT_PLATFORM` prefix.)
 
 ---
 
@@ -352,10 +450,6 @@ Longer description of the application.
 
 %install
 %qmake5_install
-
-desktop-file-install --delete-original \
-    --dir %{buildroot}%{_datadir}/applications \
-    %{buildroot}%{_datadir}/applications/*.desktop
 
 %files
 %{_bindir}/%{name}
