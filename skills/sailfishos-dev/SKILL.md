@@ -9,7 +9,9 @@ description: >
   Also activate for questions about app architecture, the .pro file, .spec file, naming
   conventions, or the emulator. Trigger on any mention of: SailfishOS, Sailfish, Silica,
   sfdk, Harbour, ApplicationWindow, PullDownMenu, PageStack, Cover, or sfdk emulator.
-version: 1.0.0
+  Detects which host it is running on (native Ubuntu SDK machine, or macOS with the SDK
+  inside a UTM Linux VM) and switches build/deploy/emulator commands accordingly.
+version: 1.1.0
 ---
 
 # SailfishOS App Development
@@ -26,6 +28,44 @@ touches a specific domain, read the matching reference file before answering.
 | `references/design-guidelines.md` | Theme.* properties, spacing, colours, pitfalls, UX patterns |
 | `references/harbour.md` | Harbour store submission, allowed APIs, RPM spec, icon/screenshot rules |
 | `references/platform-apis.md` | Notifications, DBus, Contacts, Pickers, KeepAlive, Thumbnailer |
+| `references/profile-ubuntu-native.md` | Before ANY build/deploy/emulator/debug command when the host is the Ubuntu dev machine |
+| `references/profile-mac-utm.md` | Before ANY build/deploy/emulator/debug command when the host is a Mac with the UTM VM |
+
+---
+
+## Host profiles — Step 0: detect before running anything
+
+The SDK can run in different host setups and almost every operational command
+(sfdk invocation, workspace path, emulator control, SSH endpoints) differs
+between them. Before the first build/deploy/debug command in a session, detect
+the profile and read the matching reference file. Never mix commands across
+profiles.
+
+```bash
+# from the repository root
+scripts/detect-host.sh
+```
+
+| Profile | Meaning | Read |
+|---|---|---|
+| `ubuntu-native` | Linux machine with the SDK installed natively (Docker build engine, VirtualBox emulator) | `references/profile-ubuntu-native.md` |
+| `mac-utm` | macOS (Apple silicon) machine; SDK runs inside the "SailfishOSDev" UTM Linux VM, all commands go over SSH | `references/profile-mac-utm.md` |
+| `sdk-vm-internal` | You are already inside the UTM VM — use local sfdk commands without the SSH wrapper | `references/profile-mac-utm.md` (same setup, skip the `ssh sailfishdev` prefix) |
+| `unknown` | No supported environment on this machine — tell the user; do not guess commands | — |
+
+Detection is overrideable: if `~/.config/sailfishos-dev/profile` exists, its content
+wins over the probes (useful for pinning unusual setups).
+
+Summary of what changes per profile:
+
+| Aspect | `ubuntu-native` | `mac-utm` |
+|---|---|---|
+| sfdk call | local `~/SailfishOS/bin/sfdk` | `ssh sailfishdev 'DOCKER_DEFAULT_PLATFORM=linux/386 ~/SailfishOS/bin/sfdk …'` |
+| Build engine | host Docker | Docker inside the VM (linux/386, patched image) |
+| Workspace | host home (discover mounts, don't assume) | inside the VM; sync sources from the Mac |
+| Emulator control | `sfdk emulator start` (VirtualBox) | `~/start-emu.sh` in the VM (QEMU; `sfdk emulator` unavailable) |
+| Emulator SSH | host port 2223 | VM port 2223; from the Mac via SSH jump (`-J sailfishdev`) |
+| IDE | host Qt Creator | Qt Creator inside the VM's xfce session |
 
 ---
 
@@ -264,52 +304,66 @@ private:
 
 ### Workspace constraint
 
-Projects **must** live inside the sfdk workspace directory — the build engine Docker
-container only mounts that path. On this machine: `~/repos/sailfishos-dev/`.
+Projects must live where the build engine can see them (the mounted paths —
+normally the SDK user's home). The exact location and how to verify it differ per
+host profile: read `references/profile-ubuntu-native.md` or
+`references/profile-mac-utm.md`. If you get
+`The command needs to be used under Sailfish SDK workspace`, the project is outside
+the mounted paths — move or sync it according to the profile file.
+
+### Discover targets and devices (never assume a version)
 
 ```bash
-# Check the mounted workspace:
-/usr/bin/docker inspect sailfish-sdk-build-engine_crimson | python3 -c \
-  "import json,sys; c=json.load(sys.stdin)[0]; [print(m['Source']) for m in c['Mounts'] if '/repos/' in m['Source']]"
+sfdk tools list          # installed targets, e.g. SailfishOS-5.1.0.11-{i486,armv7hl,aarch64}
+sfdk device list         # registered devices, e.g. "Sailfish OS Emulator <version>"
 ```
 
-If you get `The command needs to be used under Sailfish SDK workspace`, move your project
-inside that directory.
+Pick the target by device architecture:
 
-### This setup: Ubuntu 25.04, SailfishOS 5.0.0.62
+- Emulator: `i486`
+- Phones: `armv7hl` or `aarch64` — if unknown, check on the phone
+  (`rpm -q --qf '%{arch}' systemd`); when in doubt, build both.
+
+### Standard build / deploy / run flow
+
+Commands below are written for a local sfdk (`ubuntu-native`, or
+`sdk-vm-internal`). On `mac-utm`, run them inside the VM and prefix as shown in
+`references/profile-mac-utm.md`. Emulator control is profile-specific:
+`sfdk emulator start` requires VirtualBox (`ubuntu-native` only) — on `mac-utm`
+use the VM's emulator launcher script instead.
 
 ```bash
 SDK=~/SailfishOS/bin/sfdk
 
-# --- Emulator (i486) ---
-$SDK -c target=SailfishOS-5.0.0.62-i486 build
-$SDK emulator start
-$SDK -c target=SailfishOS-5.0.0.62-i486 \
-     -c "device=Sailfish OS Emulator 5.0.0.62" deploy --sdk
-$SDK -c "device=Sailfish OS Emulator 5.0.0.62" run harbour-myapp
+# --- Build for the target ---
+$SDK -c target=<target> build
 
-# --- Physical device aarch64 (Jolla C2, Xperia, Jolla Phone 2026) ---
-$SDK -c target=SailfishOS-5.0.0.62-aarch64 build
-$SDK -c target=SailfishOS-5.0.0.62-aarch64 \
-     -c device="<device-name>" deploy --sdk
+# --- Deploy + run on a device (device names from `sfdk device list`) ---
+$SDK -c target=<target> -c device="<device-name>" deploy --sdk
 $SDK -c device="<device-name>" run harbour-myapp
 
-# --- List devices ---
-$SDK device list
-
-# --- Emulator control ---
-$SDK emulator start
-$SDK emulator stop
-$SDK emulator status
-$SDK emulator set downscale=no   # fill window at native resolution
+# --- Debug on a device ---
+$SDK -c target=<target> -c device="<device-name>" debug harbour-myapp
 ```
+
+Example against the emulator with an installed 5.1.0.11 tooling:
+
+```bash
+$SDK -c target=SailfishOS-5.1.0.11-i486 build
+$SDK -c target=SailfishOS-5.1.0.11-i486 \
+     -c "device=Sailfish OS Emulator 5.1.0.11" deploy --sdk
+$SDK -c "device=Sailfish OS Emulator 5.1.0.11" run harbour-myapp
+```
+
+The same pattern applies to physical devices (Jolla C2, Xperia, Jolla Phone 2026)
+with their matching target.
 
 ### Switching build targets (critical workaround)
 
 `make` reuses stale `.o` files from the previous architecture. Always clean first:
 
 ```bash
-cd ~/repos/sailfishos-dev/<project>
+cd <your-project-dir>   # inside the workspace of your host profile
 rm -f *.o Makefile .qmake.stash harbour-myapp
 rm -f RPMS/*.rpm
 ~/SailfishOS/bin/sfdk -c target=<new-target> build
@@ -327,10 +381,10 @@ rm -f RPMS/*.rpm
 sfdk engine exec
 
 # Shell inside a target (install packages, inspect sysroot)
-sfdk tools target exec SailfishOS-5.0.0.62-aarch64
+sfdk tools target exec <target>
 
 # Install a package into a target
-sfdk tools target package-install SailfishOS-5.0.0.62-aarch64 qt5-qtmultimedia-devel
+sfdk tools target package-install <target> qt5-qtmultimedia-devel
 
 # List toolings and targets
 sfdk tools list
@@ -342,9 +396,13 @@ sfdk tools list
 
 ### Journal logs (most useful)
 
+SSH into the emulator the way your host profile provides (see the profile
+reference file): on `ubuntu-native` it listens on local port 2223; on `mac-utm`
+port 2223 lives inside the VM and needs an SSH jump from the Mac.
+
 ```bash
-# SSH into emulator
-ssh -p 2223 -i ~/SailfishOS/vmshare/ssh/private_keys/sdk defaultuser@127.0.0.1
+# ubuntu-native: ssh -p 2223 -i ~/SailfishOS/vmshare/ssh/private_keys/sdk defaultuser@127.0.0.1
+# mac-utm (from the Mac): ssh -J sailfishdev -p 2223 -i <key path> defaultuser@localhost
 
 # On the device/emulator, follow app logs:
 journalctl -f | grep harbour-myapp
@@ -368,9 +426,11 @@ F11 = step into, Shift+F11 = step out. Works identically for emulator and device
 ### sfdk debug (CLI GDB)
 
 ```bash
-sfdk -c target=SailfishOS-5.0.0.62-i486 \
-     -c "device=Sailfish OS Emulator 5.0.0.62" debug harbour-myapp
+sfdk -c target=<target> -c "device=<device-name>" debug harbour-myapp
 ```
+
+(Targets and device names come from `sfdk tools list` / `sfdk device list`; on
+`mac-utm` run inside the VM with the `DOCKER_DEFAULT_PLATFORM` prefix.)
 
 ---
 

@@ -12,3 +12,11 @@ and publish SailfishOS applications using the Sailfish SDK, Silica QML, and sfdk
 ## Invoke
 
 `/sailfishos-dev` — or it activates automatically when you ask about SailfishOS topics.
+
+## Host profiles
+
+The skill auto-detects where it is running (`scripts/detect-host.sh`) and switches
+its build/deploy/emulator instructions accordingly:
+
+- **ubuntu-native** — the dedicated Ubuntu dev notebook (Docker build engine, VirtualBox emulator)
+- **mac-utm** — macOS on Apple silicon; the Sailfish SDK runs inside the "SailfishOSDev" UTM Linux VM and all commands go over SSH
