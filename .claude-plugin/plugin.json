@@ -1,7 +1,12 @@
 {
   "name": "sailfishos-dev",
-  "description": "SailfishOS app development skill — build, deploy, debug and publish Sailfish apps with Silica QML",
+  "version": "2.0.0",
+  "description": "Sailfish OS app development: Silica QML, sfdk build/deploy, Harbour, plus guided SDK setup and updates on Linux",
   "author": {
     "name": "juergenbr"
-  }
+  },
+  "homepage": "https://github.com/juergenbr/claude-plugin-sailfishos-dev",
+  "repository": "https://github.com/juergenbr/claude-plugin-sailfishos-dev",
+  "license": "MIT",
+  "keywords": ["sailfishos", "sailfish", "silica", "qml", "sfdk", "harbour"]
 }
